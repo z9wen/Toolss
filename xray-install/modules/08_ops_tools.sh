@@ -26,7 +26,7 @@ checkNginx302() {
     local httpCode=
     httpCode=$(curl -I -s -o /dev/null -w "%{http_code}" "https://${currentHost}:${currentPort}")
     
-    if [[ "${httpCode}" == "302" ]] || [[ "${httpCode}" == "301" ]]; then
+    if [[ "${httpCode}" == "302" ]]; then
         echoContent green " ---> 重定向设置完毕 (HTTP ${httpCode})"
         exit 0
     fi
@@ -55,11 +55,11 @@ backupNginxConfig() {
     fi
 
 }
-# 添加302/301配置
+# 添加302配置
 addNginx302() {
     local redirectUrl="$1"
-    local redirectCode="${2:-302}"  # 默认 302
-    
+    local redirectCode="302"  # 固定使用 302
+
     # 检查配置文件是否存在
     if [[ ! -f "${nginxConfigPath}xray-agent.conf" ]]; then
         echoContent red " ---> 配置文件不存在: ${nginxConfigPath}xray-agent.conf"
@@ -71,13 +71,6 @@ addNginx302() {
     # 验证 URL 格式
     if [[ ! "${redirectUrl}" =~ ^https?:// ]]; then
         echoContent red " ---> URL 格式错误，必须以 http:// 或 https:// 开头"
-        backupNginxConfig restoreBackup
-        return 1
-    fi
-    
-    # 验证重定向代码
-    if [[ "${redirectCode}" != "301" && "${redirectCode}" != "302" ]]; then
-        echoContent red " ---> 重定向代码错误，只支持 301 或 302"
         backupNginxConfig restoreBackup
         return 1
     fi
@@ -151,24 +144,7 @@ updateNginxBlog() {
 
         if [[ "${redirectStatus}" == "1" ]]; then
             backupNginxConfig backup
-            
-            echoContent skyBlue "\n选择重定向类型:"
-            echoContent green "1.301 永久重定向（推荐⭐，SEO友好，浏览器缓存）"
-            echoContent yellow "2.302 临时重定向（测试用，不缓存）"
-            echoContent skyBlue "\n💡 说明："
-            echoContent white "  • 301: 浏览器会缓存，减少服务器请求，更隐蔽"
-            echoContent white "  • 302: 每次都经过服务器，方便测试和更换目标"
-            read -r -p "请选择[默认:1]:" redirectType
-            redirectType=${redirectType:-1}
-            
-            local redirectCode="301"
-            if [[ "${redirectType}" == "2" ]]; then
-                redirectCode="302"
-                echoContent yellow "\n使用 302 临时重定向"
-            else
-                echoContent green "\n使用 301 永久重定向（推荐）"
-                echoContent yellow "⚠️  浏览器会缓存此重定向，更改后需清除浏览器缓存"
-            fi
+            echoContent yellow "\n使用 302 临时重定向，便于随时调整目标 URL。"
 
             read -r -p "请输入要重定向的完整URL:" redirectDomain
             
@@ -179,7 +155,7 @@ updateNginxBlog() {
             fi
             
             removeNginx302
-            addNginx302 "${redirectDomain}" "${redirectCode}"
+            addNginx302 "${redirectDomain}"
             handleNginx stop
             handleNginx start
             if [[ -z $(pgrep -f "nginx") ]]; then
