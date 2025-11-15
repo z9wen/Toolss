@@ -989,6 +989,7 @@ mkdirTools() {
     mkdir -p /opt/xray-agent/tls
     mkdir -p /opt/xray-agent/subscribe_local/default
     mkdir -p /opt/xray-agent/subscribe_local/clashMeta
+    mkdir -p /opt/xray-agent/subscribe_local/sing-box
 
     mkdir -p /opt/xray-agent/subscribe_remote/default
     mkdir -p /opt/xray-agent/subscribe_remote/clashMeta
@@ -2813,6 +2814,7 @@ removeXrayOutbound() {
 # 初始化Xray 配置文件
 
 # ===== Module 07_services.sh =====
+initXrayConfig() {
     echoContent skyBlue "\n进度 $2/${totalProgress} : 初始化Xray配置"
     echo
     local uuid=
@@ -3354,6 +3356,463 @@ showAccounts() {
         done
     fi
 }
+initSubscribeLocalConfig() {
+    rm -rf /opt/xray-agent/subscribe_local/sing-box/*
+}
+# 通用
+defaultBase64Code() {
+    local type=$1
+    local port=$2
+    local email=$3
+    local id=$4
+    local add=$5
+    local path=$6
+    local user=
+    user=$(echo "${email}" | awk -F "[-]" '{print $1}')
+    if [[ ! -f "/opt/xray-agent/subscribe_local/sing-box/${user}" ]]; then
+        echo [] >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+    fi
+    local singBoxSubscribeLocalConfig=
+    if [[ "${type}" == "vlesstcp" ]]; then
+
+        echoContent yellow " ---> 通用格式(VLESS+TCP+TLS_Vision)"
+        echoContent green "    vless://${id}@${currentHost}:${port}?encryption=none&security=tls&fp=chrome&type=tcp&host=${currentHost}&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}\n"
+
+        echoContent yellow " ---> 格式化明文(VLESS+TCP+TLS_Vision)"
+        echoContent green "协议类型:VLESS，地址:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，client-fingerprint: chrome，传输方式:tcp，flow:xtls-rprx-vision，账户名:${email}\n"
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+vless://${id}@${currentHost}:${port}?encryption=none&security=tls&type=tcp&host=${currentHost}&fp=chrome&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: vless
+    server: ${currentHost}
+    port: ${port}
+    uuid: ${id}
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+EOF
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${currentHost}\",\"server_port\":${port},\"uuid\":\"${id}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"packet_encoding\":\"xudp\"}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 VLESS(VLESS+TCP+TLS_Vision)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${currentHost}%3A${port}%3Fencryption%3Dnone%26fp%3Dchrome%26security%3Dtls%26type%3Dtcp%26${currentHost}%3D${currentHost}%26headerType%3Dnone%26sni%3D${currentHost}%26flow%3Dxtls-rprx-vision%23${email}\n"
+
+    elif [[ "${type}" == "vmessws" ]]; then
+        qrCodeBase64Default=$(echo -n "{\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"allowInsecure\":0,\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}" | base64 -w 0)
+        qrCodeBase64Default="${qrCodeBase64Default// /}"
+
+        echoContent yellow " ---> 通用json(VMess+WS+TLS)"
+        echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"allowInsecure\":0,\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
+        echoContent yellow " ---> 通用vmess(VMess+WS+TLS)链接"
+        echoContent green "    vmess://${qrCodeBase64Default}\n"
+        echoContent yellow " ---> 二维码 vmess(VMess+WS+TLS)"
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+vmess://${qrCodeBase64Default}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: vmess
+    server: ${add}
+    port: ${port}
+    uuid: ${id}
+    alterId: 0
+    cipher: none
+    udp: true
+    tls: true
+    client-fingerprint: chrome
+    servername: ${currentHost}
+    network: ws
+    ws-opts:
+      path: ${path}
+      headers:
+        Host: ${currentHost}
+EOF
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vmess\",\"server\":\"${add}\",\"server_port\":${port},\"uuid\":\"${id}\",\"alter_id\":0,\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"packet_encoding\":\"packetaddr\",\"transport\":{\"type\":\"ws\",\"path\":\"${path}\",\"max_early_data\":2048,\"early_data_header_name\":\"Sec-WebSocket-Protocol\"}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vmess://${qrCodeBase64Default}\n"
+
+    elif [[ "${type}" == "vlessws" ]]; then
+
+        echoContent yellow " ---> 通用格式(VLESS+WS+TLS)"
+        echoContent green "    vless://${id}@${add}:${port}?encryption=none&security=tls&type=ws&host=${currentHost}&sni=${currentHost}&fp=chrome&path=${path}#${email}\n"
+
+        echoContent yellow " ---> 格式化明文(VLESS+WS+TLS)"
+        echoContent green "    协议类型:VLESS，地址:${add}，伪装域名/SNI:${currentHost}，端口:${port}，client-fingerprint: chrome,用户ID:${id}，安全:tls，传输方式:ws，路径:${path}，账户名:${email}\n"
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+vless://${id}@${add}:${port}?encryption=none&security=tls&type=ws&host=${currentHost}&sni=${currentHost}&fp=chrome&path=${path}#${email}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: vless
+    server: ${add}
+    port: ${port}
+    uuid: ${id}
+    udp: true
+    tls: true
+    network: ws
+    client-fingerprint: chrome
+    servername: ${currentHost}
+    ws-opts:
+      path: ${path}
+      headers:
+        Host: ${currentHost}
+EOF
+
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${add}\",\"server_port\":${port},\"uuid\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"multiplex\":{\"enabled\":false,\"protocol\":\"smux\",\"max_streams\":32},\"packet_encoding\":\"xudp\",\"transport\":{\"type\":\"ws\",\"path\":\"${path}\",\"headers\":{\"Host\":\"${currentHost}\"}}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 VLESS(VLESS+WS+TLS)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dws%26host%3D${currentHost}%26fp%3Dchrome%26sni%3D${currentHost}%26path%3D${path}%23${email}"
+
+    elif [[ "${type}" == "vlessXHTTP" ]]; then
+
+        echoContent yellow " ---> 通用格式(VLESS+reality+XHTTP)"
+        echoContent green "    vless://${id}@$(getPublicIP):${port}?encryption=none&security=reality&type=xhttp&sni=${xrayVLESSRealityXHTTPServerName}&host=${xrayVLESSRealityXHTTPServerName}&fp=chrome&path=${path}&pbk=${currentRealityXHTTPPublicKey}&sid=6ba85179e30d4fc2#${email}\n"
+
+        echoContent yellow " ---> 格式化明文(VLESS+reality+XHTTP)"
+        echoContent green "协议类型:VLESS reality，地址:$(getPublicIP)，publicKey:${currentRealityXHTTPPublicKey}，shortId: 6ba85179e30d4fc2,serverNames：${xrayVLESSRealityXHTTPServerName}，端口:${port}，路径：${path}，SNI:${xrayVLESSRealityXHTTPServerName}，伪装域名:${xrayVLESSRealityXHTTPServerName}，用户ID:${id}，传输方式:xhttp，账户名:${email}\n"
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+vless://${id}@$(getPublicIP):${port}?encryption=none&security=reality&type=xhttp&sni=${xrayVLESSRealityXHTTPServerName}&fp=chrome&path=${path}&pbk=${currentRealityXHTTPPublicKey}&sid=6ba85179e30d4fc2#${email}
+EOF
+        echoContent yellow " ---> 二维码 VLESS(VLESS+reality+XHTTP)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40$(getPublicIP)%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26type%3Dtcp%26sni%3D${xrayVLESSRealityXHTTPServerName}%26fp%3Dchrome%26path%3D${path}%26host%3D${xrayVLESSRealityXHTTPServerName}%26pbk%3D${currentRealityXHTTPPublicKey}%26sid%3D6ba85179e30d4fc2%23${email}\n"
+
+    elif
+        [[ "${type}" == "vlessgrpc" ]]
+    then
+
+        echoContent yellow " ---> 通用格式(VLESS+gRPC+TLS)"
+        echoContent green "    vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&fp=chrome&serviceName=${currentPath}grpc&alpn=h2&sni=${currentHost}#${email}\n"
+
+        echoContent yellow " ---> 格式化明文(VLESS+gRPC+TLS)"
+        echoContent green "    协议类型:VLESS，地址:${add}，伪装域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:gRPC，alpn:h2，client-fingerprint: chrome,serviceName:${currentPath}grpc，账户名:${email}\n"
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&serviceName=${currentPath}grpc&fp=chrome&alpn=h2&sni=${currentHost}#${email}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: vless
+    server: ${add}
+    port: ${port}
+    uuid: ${id}
+    udp: true
+    tls: true
+    network: grpc
+    client-fingerprint: chrome
+    servername: ${currentHost}
+    grpc-opts:
+      grpc-service-name: ${currentPath}grpc
+EOF
+
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\": \"vless\",\"server\": \"${add}\",\"server_port\": ${port},\"uuid\": \"${id}\",\"tls\": {  \"enabled\": true,  \"server_name\": \"${currentHost}\",  \"utls\": {    \"enabled\": true,    \"fingerprint\": \"chrome\"  }},\"packet_encoding\": \"xudp\",\"transport\": {  \"type\": \"grpc\",  \"service_name\": \"${currentPath}grpc\"}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 VLESS(VLESS+gRPC+TLS)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dgrpc%26host%3D${currentHost}%26serviceName%3D${currentPath}grpc%26fp%3Dchrome%26path%3D${currentPath}grpc%26sni%3D${currentHost}%26alpn%3Dh2%23${email}"
+
+    elif [[ "${type}" == "trojan" ]]; then
+        # URLEncode
+        echoContent yellow " ---> Trojan(TLS)"
+        echoContent green "    trojan://${id}@${currentHost}:${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${currentHost}_Trojan\n"
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+trojan://${id}@${currentHost}:${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan
+EOF
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: trojan
+    server: ${currentHost}
+    port: ${port}
+    password: ${id}
+    client-fingerprint: chrome
+    udp: true
+    sni: ${currentHost}
+EOF
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"trojan\",\"server\":\"${currentHost}\",\"server_port\":${port},\"password\":\"${id}\",\"tls\":{\"alpn\":[\"http/1.1\"],\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 Trojan(TLS)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=trojan%3a%2f%2f${id}%40${currentHost}%3a${port}%3fpeer%3d${currentHost}%26fp%3Dchrome%26sni%3d${currentHost}%26alpn%3Dhttp/1.1%23${email}\n"
+
+    elif [[ "${type}" == "trojangrpc" ]]; then
+        # URLEncode
+
+        echoContent yellow " ---> Trojan gRPC(TLS)"
+        echoContent green "    trojan://${id}@${add}:${port}?encryption=none&peer=${currentHost}&fp=chrome&security=tls&type=grpc&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}\n"
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+trojan://${id}@${add}:${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    server: ${add}
+    port: ${port}
+    type: trojan
+    password: ${id}
+    network: grpc
+    sni: ${currentHost}
+    udp: true
+    grpc-opts:
+      grpc-service-name: ${currentPath}trojangrpc
+EOF
+
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"trojan\",\"server\":\"${add}\",\"server_port\":${port},\"password\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"insecure\":true,\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"transport\":{\"type\":\"grpc\",\"service_name\":\"${currentPath}trojangrpc\",\"idle_timeout\":\"15s\",\"ping_timeout\":\"15s\",\"permit_without_stream\":false},\"multiplex\":{\"enabled\":false,\"protocol\":\"smux\",\"max_streams\":32}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 Trojan gRPC(TLS)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=trojan%3a%2f%2f${id}%40${add}%3a${port}%3Fencryption%3Dnone%26fp%3Dchrome%26security%3Dtls%26peer%3d${currentHost}%26type%3Dgrpc%26sni%3d${currentHost}%26path%3D${currentPath}trojangrpc%26alpn%3Dh2%26serviceName%3D${currentPath}trojangrpc%23${email}\n"
+
+    elif [[ "${type}" == "hysteria" ]]; then
+        echoContent yellow " ---> Hysteria(TLS)"
+        local clashMetaPortContent="port: ${port}"
+        local multiPort=
+        local multiPortEncode
+        if echo "${port}" | grep -q "-"; then
+            clashMetaPortContent="ports: ${port}"
+            multiPort="mport=${port}&"
+            multiPortEncode="mport%3D${port}%26"
+        fi
+
+        echoContent green "    hysteria2://${id}@${currentHost}:${singBoxHysteria2Port}?${multiPort}peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}\n"
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+hysteria2://${id}@${currentHost}:${singBoxHysteria2Port}?${multiPort}peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}
+EOF
+        echoContent yellow " ---> v2rayN(hysteria+TLS)"
+        echo "{\"server\": \"${currentHost}:${port}\",\"socks5\": { \"listen\": \"127.0.0.1:7798\", \"timeout\": 300},\"auth\":\"${id}\",\"tls\":{\"sni\":\"${currentHost}\"}}" | jq
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: hysteria2
+    server: ${currentHost}
+    ${clashMetaPortContent}
+    password: ${id}
+    alpn:
+        - h3
+    sni: ${currentHost}
+    up: "${hysteria2ClientUploadSpeed} Mbps"
+    down: "${hysteria2ClientDownloadSpeed} Mbps"
+EOF
+
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"hysteria2\",\"server\":\"${currentHost}\",\"server_port\":${singBoxHysteria2Port},\"up_mbps\":${hysteria2ClientUploadSpeed},\"down_mbps\":${hysteria2ClientDownloadSpeed},\"password\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"alpn\":[\"h3\"]}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 Hysteria2(TLS)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=hysteria2%3A%2F%2F${id}%40${currentHost}%3A${singBoxHysteria2Port}%3F${multiPortEncode}peer%3D${currentHost}%26insecure%3D0%26sni%3D${currentHost}%26alpn%3Dh3%23${email}\n"
+
+    elif [[ "${type}" == "vlessReality" ]]; then
+        local realityServerName=${xrayVLESSRealityServerName}
+        local publicKey=${currentRealityPublicKey}
+        local realityMldsa65Verify=${currentRealityMldsa65Verify}
+
+        if [[ "${coreInstallType}" == "2" ]]; then
+            realityServerName=${singBoxVLESSRealityVisionServerName}
+            publicKey=${singBoxVLESSRealityPublicKey}
+        fi
+        echoContent yellow " ---> 通用格式(VLESS+reality+uTLS+Vision)"
+        echoContent green "    vless://${id}@$(getPublicIP):${port}?encryption=none&security=reality&pqv=${realityMldsa65Verify}&type=tcp&sni=${realityServerName}&fp=chrome&pbk=${publicKey}&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#${email}\n"
+
+        echoContent yellow " ---> 格式化明文(VLESS+reality+uTLS+Vision)"
+        echoContent green "协议类型:VLESS reality，地址:$(getPublicIP)，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2，pqv=${realityMldsa65Verify}，serverNames：${realityServerName}，端口:${port}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+vless://${id}@$(getPublicIP):${port}?encryption=none&security=reality&pqv=${realityMldsa65Verify}&type=tcp&sni=${realityServerName}&fp=chrome&pbk=${publicKey}&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#${email}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: vless
+    server: $(getPublicIP)
+    port: ${port}
+    uuid: ${id}
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    servername: ${realityServerName}
+    reality-opts:
+      public-key: ${publicKey}
+      short-id: 6ba85179e30d4fc2
+    client-fingerprint: chrome
+EOF
+
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"$(getPublicIP)\",\"server_port\":${port},\"uuid\":\"${id}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{\"enabled\":true,\"server_name\":\"${realityServerName}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"${publicKey}\",\"short_id\":\"6ba85179e30d4fc2\"}},\"packet_encoding\":\"xudp\"}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 VLESS(VLESS+reality+uTLS+Vision)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40$(getPublicIP)%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26type%3Dtcp%26sni%3D${realityServerName}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26flow%3Dxtls-rprx-vision%23${email}\n"
+
+    elif [[ "${type}" == "vlessRealityGRPC" ]]; then
+        local realityServerName=${xrayVLESSRealityServerName}
+        local publicKey=${currentRealityPublicKey}
+        local realityMldsa65Verify=${currentRealityMldsa65Verify}
+
+        if [[ "${coreInstallType}" == "2" ]]; then
+            realityServerName=${singBoxVLESSRealityGRPCServerName}
+            publicKey=${singBoxVLESSRealityPublicKey}
+        fi
+
+        echoContent yellow " ---> 通用格式(VLESS+reality+uTLS+gRPC)"
+        # pqv=${realityMldsa65Verify}&
+        echoContent green "    vless://${id}@$(getPublicIP):${port}?encryption=none&security=reality&type=grpc&sni=${realityServerName}&fp=chrome&pbk=${publicKey}&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#${email}\n"
+
+        echoContent yellow " ---> 格式化明文(VLESS+reality+uTLS+gRPC)"
+        # pqv=${realityMldsa65Verify}，
+        echoContent green "协议类型:VLESS reality，serviceName:grpc，地址:$(getPublicIP)，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2，serverNames：${realityServerName}，端口:${port}，用户ID:${id}，传输方式:gRPC，client-fingerprint：chrome，账户名:${email}\n"
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+vless://${id}@$(getPublicIP):${port}?encryption=none&security=reality&pqv=${realityMldsa65Verify}&type=grpc&sni=${realityServerName}&fp=chrome&pbk=${publicKey}&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#${email}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: vless
+    server: $(getPublicIP)
+    port: ${port}
+    uuid: ${id}
+    network: grpc
+    tls: true
+    udp: true
+    servername: ${realityServerName}
+    reality-opts:
+      public-key: ${publicKey}
+      short-id: 6ba85179e30d4fc2
+    grpc-opts:
+      grpc-service-name: "grpc"
+    client-fingerprint: chrome
+EOF
+
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"$(getPublicIP)\",\"server_port\":${port},\"uuid\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${realityServerName}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"${publicKey}\",\"short_id\":\"6ba85179e30d4fc2\"}},\"packet_encoding\":\"xudp\",\"transport\":{\"type\":\"grpc\",\"service_name\":\"grpc\"}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 VLESS(VLESS+reality+uTLS+gRPC)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40$(getPublicIP)%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26type%3Dgrpc%26sni%3D${realityServerName}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26path%3Dgrpc%26serviceName%3Dgrpc%23${email}\n"
+    elif [[ "${type}" == "tuic" ]]; then
+        local tuicUUID=
+        tuicUUID=$(echo "${id}" | awk -F "[_]" '{print $1}')
+
+        local tuicPassword=
+        tuicPassword=$(echo "${id}" | awk -F "[_]" '{print $2}')
+
+        if [[ -z "${email}" ]]; then
+            echoContent red " ---> 读取配置失败，请重新安装"
+            exit 0
+        fi
+
+        echoContent yellow " ---> 格式化明文(Tuic+TLS)"
+        echoContent green "    协议类型:Tuic，地址:${currentHost}，端口：${port}，uuid：${tuicUUID}，password：${tuicPassword}，congestion-controller:${tuicAlgorithm}，alpn: h3，账户名:${email}\n"
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+tuic://${tuicUUID}:${tuicPassword}@${currentHost}:${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=quic&allow_insecure=0#${email}
+EOF
+        echoContent yellow " ---> v2rayN(Tuic+TLS)"
+        echo "{\"relay\": {\"server\": \"${currentHost}:${port}\",\"uuid\": \"${tuicUUID}\",\"password\": \"${tuicPassword}\",\"ip\": \"${currentHost}\",\"congestion_control\": \"${tuicAlgorithm}\",\"alpn\": [\"h3\"]},\"local\": {\"server\": \"127.0.0.1:7798\"},\"log_level\": \"warn\"}" | jq
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    server: ${currentHost}
+    type: tuic
+    port: ${port}
+    uuid: ${tuicUUID}
+    password: ${tuicPassword}
+    alpn:
+     - h3
+    congestion-controller: ${tuicAlgorithm}
+    disable-sni: true
+    reduce-rtt: true
+    sni: ${email}
+EOF
+
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\": \"tuic\",\"server\": \"${currentHost}\",\"server_port\": ${port},\"uuid\": \"${tuicUUID}\",\"password\": \"${tuicPassword}\",\"congestion_control\": \"${tuicAlgorithm}\",\"tls\": {\"enabled\": true,\"server_name\": \"${currentHost}\",\"alpn\": [\"h3\"]}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow "\n ---> 二维码 Tuic"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=tuic%3A%2F%2F${tuicUUID}%3A${tuicPassword}%40${currentHost}%3A${tuicPort}%3Fcongestion_control%3D${tuicAlgorithm}%26alpn%3Dh3%26sni%3D${currentHost}%26udp_relay_mode%3Dquic%26allow_insecure%3D0%23${email}\n"
+    elif [[ "${type}" == "naive" ]]; then
+        echoContent yellow " ---> Naive(TLS)"
+
+        echoContent green "    naive+https://${email}:${id}@${currentHost}:${port}?padding=true#${email}\n"
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+naive+https://${email}:${id}@${currentHost}:${port}?padding=true#${email}
+EOF
+        echoContent yellow " ---> 二维码 Naive(TLS)"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=naive%2Bhttps%3A%2F%2F${email}%3A${id}%40${currentHost}%3A${port}%3Fpadding%3Dtrue%23${email}\n"
+    elif [[ "${type}" == "vmessHTTPUpgrade" ]]; then
+        qrCodeBase64Default=$(echo -n "{\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"allowInsecure\":0,\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}" | base64 -w 0)
+        qrCodeBase64Default="${qrCodeBase64Default// /}"
+
+        echoContent yellow " ---> 通用json(VMess+HTTPUpgrade+TLS)"
+        echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"allowInsecure\":0,\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
+        echoContent yellow " ---> 通用vmess(VMess+HTTPUpgrade+TLS)链接"
+        echoContent green "    vmess://${qrCodeBase64Default}\n"
+        echoContent yellow " ---> 二维码 vmess(VMess+HTTPUpgrade+TLS)"
+
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+   vmess://${qrCodeBase64Default}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: vmess
+    server: ${add}
+    port: ${port}
+    uuid: ${id}
+    alterId: 0
+    cipher: auto
+    udp: true
+    tls: true
+    client-fingerprint: chrome
+    servername: ${currentHost}
+    network: ws
+    ws-opts:
+     path: ${path}
+     headers:
+       Host: ${currentHost}
+     v2ray-http-upgrade: true
+EOF
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"vmess\",\"server\":\"${add}\",\"server_port\":${port},\"uuid\":\"${id}\",\"security\":\"auto\",\"alter_id\":0,\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"packet_encoding\":\"packetaddr\",\"transport\":{\"type\":\"httpupgrade\",\"path\":\"${path}\"}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vmess://${qrCodeBase64Default}\n"
+
+    elif [[ "${type}" == "anytls" ]]; then
+        echoContent yellow " ---> AnyTLS"
+
+        echoContent yellow " ---> 格式化明文(AnyTLS)"
+        echoContent green "协议类型:anytls，地址:${currentHost}，端口:${singBoxAnyTLSPort}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
+
+        echoContent green "    anytls://${id}@${currentHost}:${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}\n"
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
+anytls://${id}@${currentHost}:${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}
+EOF
+        cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
+  - name: "${email}"
+    type: anytls
+    port: ${singBoxAnyTLSPort}
+    server: ${currentHost}
+    password: ${id}
+    client-fingerprint: chrome
+    udp: true
+    sni: ${currentHost}
+    alpn:
+      - h2
+      - http/1.1
+EOF
+
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\":\"anytls\",\"server\":\"${currentHost}\",\"server_port\":${singBoxAnyTLSPort},\"password\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\"}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
+
+        echoContent yellow " ---> 二维码 AnyTLS"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=anytls%3A%2F%2F${id}%40${currentHost}%3A${singBoxAnyTLSPort}%3Fpeer%3D${currentHost}%26insecure%3D0%26sni%3D${currentHost}%23${email}\n"
+    fi
+
+}
+
+
 # 移除nginx302配置
 
 # ===== Module 08_ops_tools.sh =====
@@ -3380,18 +3839,44 @@ removeNginx302() {
 
 # 检查302是否成功
 checkNginx302() {
-    # 使用 -I 获取 HTTP 头，-L 跟随重定向，-w 格式化输出状态码
+    local testHost="${currentHost}"
+    local testPort="${currentPort}"
+
+    if [[ -z "${testHost}" || "${testHost}" == "null" ]]; then
+        testHost=$(getPublicIP)
+    fi
+    if [[ -z "${testHost}" ]]; then
+        testHost="127.0.0.1"
+    fi
+
+    if [[ -z "${testPort}" || "${testPort}" == "null" ]]; then
+        if [[ -n "${currentDefaultPort}" ]]; then
+            testPort="${currentDefaultPort}"
+        else
+            testPort=443
+        fi
+    fi
+
+    local scheme="https"
+    if [[ "${testPort}" == "80" ]]; then
+        scheme="http"
+    fi
+
+    local targetUrl="${scheme}://${testHost}:${testPort}"
     local httpCode=
-    httpCode=$(curl -I -s -o /dev/null -w "%{http_code}" "https://${currentHost}:${currentPort}")
+    httpCode=$(curl -I -k --connect-timeout 5 -s -o /dev/null -w "%{http_code}" "${targetUrl}")
     
     if [[ "${httpCode}" == "302" ]]; then
         echoContent green " ---> 重定向设置完毕 (HTTP ${httpCode})"
         exit 0
     fi
-    
+
     echoContent red " ---> 重定向设置失败，HTTP状态码: ${httpCode}"
+    echoContent yellow " ---> 检测 URL: ${targetUrl}"
     echoContent yellow "请检查配置是否正确"
     backupNginxConfig restoreBackup
+    handleNginx stop >/dev/null 2>&1
+    handleNginx start >/dev/null 2>&1
 }
 
 # 备份恢复nginx文件
