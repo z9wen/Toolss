@@ -422,7 +422,7 @@ showAccounts() {
     if echo ${currentInstallProtocolType} | grep -q ",0,"; then
 
         echoContent skyBlue "============================= VLESS TCP TLS_Vision [推荐] ==============================\n"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}02_VLESS_TCP_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}02_VLESS_TCP_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
 
@@ -436,7 +436,7 @@ showAccounts() {
     if echo ${currentInstallProtocolType} | grep -q ",1,"; then
         echoContent skyBlue "\n================================ VLESS WS TLS [仅CDN推荐] ================================\n"
 
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}03_VLESS_WS_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}03_VLESS_WS_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
 
@@ -459,7 +459,7 @@ showAccounts() {
     # trojan grpc
     if echo ${currentInstallProtocolType} | grep -q ",2,"; then
         echoContent skyBlue "\n================================  Trojan gRPC TLS [仅CDN推荐]  ================================\n"
-        jq .inbounds[0].settings.clients ${configPath}04_trojan_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//[] | .[]' ${configPath}04_trojan_gRPC_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email)
             local count=
@@ -477,7 +477,7 @@ showAccounts() {
     # VLESS grpc
     if echo ${currentInstallProtocolType} | grep -q ",5,"; then
         echoContent skyBlue "\n=============================== VLESS gRPC TLS [仅CDN推荐]  ===============================\n"
-        jq .inbounds[0].settings.clients ${configPath}06_VLESS_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//[] | .[]' ${configPath}06_VLESS_gRPC_inbounds.json | while read -r user; do
 
             local email=
             email=$(echo "${user}" | jq -r .email)
@@ -497,7 +497,7 @@ showAccounts() {
     # VLESS reality vision
     if echo ${currentInstallProtocolType} | grep -q ",7,"; then
         echoContent skyBlue "============================= VLESS reality_vision [推荐]  ==============================\n"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}07_VLESS_vision_reality_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}07_VLESS_vision_reality_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
 
@@ -509,7 +509,7 @@ showAccounts() {
     # VLESS reality gRPC
     if echo ${currentInstallProtocolType} | grep -q ",8,"; then
         echoContent skyBlue "============================== VLESS reality_gRPC [推荐] ===============================\n"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}08_VLESS_vision_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}08_VLESS_vision_gRPC_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
 
@@ -522,7 +522,7 @@ showAccounts() {
     if echo ${currentInstallProtocolType} | grep -q ",12,"; then
         echoContent skyBlue "\n================================ VLESS XHTTP TLS [仅CDN推荐] ================================\n"
 
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}12_VLESS_XHTTP_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}12_VLESS_XHTTP_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
             echo

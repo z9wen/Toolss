@@ -384,23 +384,23 @@ readInstallProtocolType() {
             frontingType=03_VLESS_WS_inbounds
         fi
         if echo "${row}" | grep -q VLESS_XHTTP_inbounds; then
-            currentInstallProtocolType="${currentInstallProtocolType}12,"
+            currentInstallProtocolType="${currentInstallProtocolType}4,"
             xrayVLESSRealityXHTTPort=$(jq -r .inbounds[0].port "${row}.json")
             xrayVLESSRealityXHTTPServerName=$(jq -r .inbounds[0].streamSettings.realitySettings.serverNames[0] "${row}.json")
             currentRealityXHTTPPublicKey=$(jq -r .inbounds[0].streamSettings.realitySettings.publicKey "${row}.json")
         fi
 
         if echo "${row}" | grep -q trojan_gRPC_inbounds; then
-            currentInstallProtocolType="${currentInstallProtocolType}2,"
+            currentInstallProtocolType="${currentInstallProtocolType}11,"
         fi
         if echo "${row}" | grep -q VLESS_gRPC_inbounds; then
-            currentInstallProtocolType="${currentInstallProtocolType}5,"
+            currentInstallProtocolType="${currentInstallProtocolType}2,"
         fi
         if echo "${row}" | grep -q hysteria2_inbounds; then
             currentInstallProtocolType="${currentInstallProtocolType}6,"
         fi
         if echo "${row}" | grep -q VLESS_vision_reality_inbounds; then
-            currentInstallProtocolType="${currentInstallProtocolType}7,"
+            currentInstallProtocolType="${currentInstallProtocolType}3,"
             xrayVLESSRealityServerName=$(jq -r .inbounds[0].streamSettings.realitySettings.serverNames[0] "${row}.json")
             realityServerName=${xrayVLESSRealityServerName}
             xrayVLESSRealityPort=$(jq -r .inbounds[0].port "${row}.json")
@@ -447,12 +447,15 @@ checkBTPanel() {
     if [[ -n $(pgrep -f "BT-Panel") ]]; then
         # 读取域名
         if [[ -d '/www/server/panel/vhost/cert/' && -n $(find /www/server/panel/vhost/cert/*/fullchain.pem) ]]; then
-            if [[ -z "${currentHost}" ]]; then
+            # 如果用户选择不使用上次配置或currentHost为空，则提示用户选择
+            if [[ "${forceSelectDomain}" == "true" ]] || [[ -z "${currentHost}" ]]; then
                 echoContent skyBlue "\n读取宝塔配置\n"
 
                 find /www/server/panel/vhost/cert/*/fullchain.pem | awk -F "[/]" '{print $7}' | awk '{print NR""":"$0}'
 
                 read -r -p "请输入编号选择:" selectBTDomain
+                # 选择完成后清除标志
+                forceSelectDomain=false
             else
                 selectBTDomain=$(find /www/server/panel/vhost/cert/*/fullchain.pem | awk -F "[/]" '{print $7}' | awk '{print NR""":"$0}' | grep "${currentHost}" | cut -d ":" -f 1)
             fi
@@ -490,12 +493,15 @@ check1Panel() {
     if [[ -n $(pgrep -f "1panel") ]]; then
         # 读取域名
         if [[ -d '/opt/1panel/apps/openresty/openresty/www/sites/' && -n $(find /opt/1panel/apps/openresty/openresty/www/sites/*/ssl/fullchain.pem) ]]; then
-            if [[ -z "${currentHost}" ]]; then
+            # 如果用户选择不使用上次配置或currentHost为空，则提示用户选择
+            if [[ "${forceSelectDomain}" == "true" ]] || [[ -z "${currentHost}" ]]; then
                 echoContent skyBlue "\n读取1Panel配置\n"
 
                 find /opt/1panel/apps/openresty/openresty/www/sites/*/ssl/fullchain.pem | awk -F "[/]" '{print $9}' | awk '{print NR""":"$0}'
 
                 read -r -p "请输入编号选择:" selectBTDomain
+                # 选择完成后清除标志
+                forceSelectDomain=false
             else
                 selectBTDomain=$(find /opt/1panel/apps/openresty/openresty/www/sites/*/ssl/fullchain.pem | awk -F "[/]" '{print $9}' | awk '{print NR""":"$0}' | grep "${currentHost}" | cut -d ":" -f 1)
             fi
@@ -545,7 +551,8 @@ checkHestiaPanel() {
         fi
 
         local selectHestiaDomain=
-        if [[ -z "${currentHost}" ]]; then
+        # 如果用户选择不使用上次配置或currentHost为空，则提示用户选择
+        if [[ "${forceSelectDomain}" == "true" ]] || [[ -z "${currentHost}" ]]; then
             echoContent skyBlue "\n读取HestiaCP配置\n"
             local displayIndex
             for ((displayIndex = 0; displayIndex < domainCount; displayIndex++)); do
@@ -553,6 +560,8 @@ checkHestiaPanel() {
                 echo "${printIndex}:${hestiaDomains[displayIndex]} (user:${hestiaUsers[displayIndex]})"
             done
             read -r -p "请输入编号选择:" selectHestiaDomain
+            # 选择完成后清除标志
+            forceSelectDomain=false
         else
             for ((displayIndex = 0; displayIndex < domainCount; displayIndex++)); do
                 if [[ "${hestiaDomains[displayIndex]}" == "${currentHost}" ]]; then
@@ -734,6 +743,14 @@ readLastInstallationConfig() {
         read -r -p "读取到上次安装的配置，是否使用 ？[y/n]:" lastInstallationConfigStatus
         if [[ "${lastInstallationConfigStatus}" == "y" ]]; then
             lastInstallationConfig=true
+        else
+            # 用户选择不使用上次配置，设置标志强制重新选择
+            forceSelectDomain=true
+            lastInstallationConfig=
+            currentHost=
+            currentPath=
+            currentDefaultPort=
+            btDomain=
         fi
     fi
 }
@@ -751,26 +768,39 @@ readConfigHostPathUUID() {
 
         # 安装
         if [[ -n "${frontingType}" ]]; then
-            currentHost=$(jq -r .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile ${configPath}${frontingType}.json | awk -F '[t][l][s][/]' '{print $2}' | awk -F '[.][c][r][t]' '{print $1}')
+            # 优先从 VLESS TCP 配置中读取域名（因为它有 TLS 证书）
+            if [[ -f "${configPath}02_VLESS_TCP_inbounds.json" ]]; then
+                currentHost=$(jq -r .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile ${configPath}02_VLESS_TCP_inbounds.json | awk -F '[t][l][s][/]' '{print $2}' | awk -F '[.][c][r][t]' '{print $1}')
+            else
+                currentHost=$(jq -r .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile ${configPath}${frontingType}.json | awk -F '[t][l][s][/]' '{print $2}' | awk -F '[.][c][r][t]' '{print $1}')
+            fi
 
-            currentPort=$(jq .inbounds[0].port ${configPath}${frontingType}.json)
+            # 优先从 VLESS TCP 读取端口（对外端口）
+            if [[ -f "${configPath}02_VLESS_TCP_inbounds.json" ]]; then
+                currentPort=$(jq .inbounds[0].port ${configPath}02_VLESS_TCP_inbounds.json)
+            else
+                currentPort=$(jq .inbounds[0].port ${configPath}${frontingType}.json)
+            fi
 
             local defaultPortFile=
             defaultPortFile=$(find ${configPath}* | grep "default")
 
             if [[ -n "${defaultPortFile}" ]]; then
                 currentDefaultPort=$(echo "${defaultPortFile}" | awk -F [_] '{print $4}')
+            elif [[ -f "${configPath}02_VLESS_TCP_inbounds.json" ]]; then
+                # 优先从 VLESS TCP 读取对外端口
+                currentDefaultPort=$(jq -r .inbounds[0].port ${configPath}02_VLESS_TCP_inbounds.json)
             else
                 currentDefaultPort=$(jq -r .inbounds[0].port ${configPath}${frontingType}.json)
             fi
             currentUUID=$(jq -r .inbounds[0].settings.clients[0].id ${configPath}${frontingType}.json)
-            currentClients=$(jq -r .inbounds[0].settings.clients ${configPath}${frontingType}.json)
+            currentClients=$(jq -r '.inbounds[0].settings.clients // []' ${configPath}${frontingType}.json)
         fi
 
         # reality
-        if echo ${currentInstallProtocolType} | grep -q ",7,"; then
+        if echo ${currentInstallProtocolType} | grep -q ",3,"; then
 
-            currentClients=$(jq -r .inbounds[0].settings.clients ${configPath}07_VLESS_vision_reality_inbounds.json)
+            currentClients=$(jq -r '.inbounds[0].settings.clients // []' ${configPath}07_VLESS_vision_reality_inbounds.json)
             currentUUID=$(jq -r .inbounds[0].settings.clients[0].id ${configPath}07_VLESS_vision_reality_inbounds.json)
             xrayVLESSRealityVisionPort=$(jq -r .inbounds[0].port ${configPath}07_VLESS_vision_reality_inbounds.json)
             if [[ "${currentPort}" == "${xrayVLESSRealityVisionPort}" ]]; then
@@ -783,20 +813,29 @@ readConfigHostPathUUID() {
     if [[ -n "${configPath}" && -n "${frontingType}" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
             local fallback
-            fallback=$(jq -r -c '.inbounds[0].settings.fallbacks[]|select(.path)' ${configPath}${frontingType}.json | head -1)
+            # 优先从 VLESS TCP 配置中读取path（因为它有 fallbacks）
+            if [[ -f "${configPath}02_VLESS_TCP_inbounds.json" ]]; then
+                fallback=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.path)' ${configPath}02_VLESS_TCP_inbounds.json | head -1)
+            else
+                fallback=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.path)' ${configPath}${frontingType}.json | head -1)
+            fi
 
             local path
             path=$(echo "${fallback}" | jq -r .path | awk -F "[/]" '{print $2}')
 
-            if [[ $(echo "${fallback}" | jq -r .dest) == 31297 ]]; then
-                currentPath=$(echo "${path}" | awk -F "[w][s]" '{print $1}')
-            elif [[ $(echo "${fallback}" | jq -r .dest) == 31299 ]]; then
-                currentPath=$(echo "${path}" | awk -F "[v][w][s]" '{print $1}')
+            if [[ $(echo "${fallback}" | jq -r .dest) == 31297 ]] || [[ $(echo "${fallback}" | jq -r .dest) == 31299 ]]; then
+                # path已经是纯路径，不需要去除后缀
+                currentPath="${path}"
             fi
 
             # 尝试读取alpn h2 Path
             if [[ -z "${currentPath}" ]]; then
-                dest=$(jq -r -c '.inbounds[0].settings.fallbacks[]|select(.alpn)|.dest' ${configPath}${frontingType}.json | head -1)
+                # 优先从 VLESS TCP 配置中读取alpn fallback
+                if [[ -f "${configPath}02_VLESS_TCP_inbounds.json" ]]; then
+                    dest=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.alpn)|.dest' ${configPath}02_VLESS_TCP_inbounds.json | head -1)
+                else
+                    dest=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.alpn)|.dest' ${configPath}${frontingType}.json | head -1)
+                fi
                 if [[ "${dest}" == "31302" || "${dest}" == "31304" ]]; then
                     checkBTPanel
                     check1Panel
@@ -804,7 +843,7 @@ readConfigHostPathUUID() {
                     if grep -q "trojangrpc {" <${nginxConfigPath}xray-agent.conf; then
                         currentPath=$(grep "trojangrpc {" <${nginxConfigPath}xray-agent.conf | awk -F "[/]" '{print $2}' | awk -F "[t][r][o][j][a][n]" '{print $1}')
                     elif grep -q "grpc {" <${nginxConfigPath}xray-agent.conf; then
-                        currentPath=$(grep "grpc {" <${nginxConfigPath}xray-agent.conf | head -1 | awk -F "[/]" '{print $2}' | awk -F "[g][r][p][c]" '{print $1}')
+                        currentPath=$(grep "grpc {" <${nginxConfigPath}xray-agent.conf | head -1 | awk -F "[/]" '{print $2}')
                     fi
                 fi
             fi
@@ -846,13 +885,13 @@ showInstallStatus() {
             echoContent yellow "Trojan+gRPC[TLS] \c"
         fi
 
-        if echo ${currentInstallProtocolType} | grep -q ",5,"; then
+        if echo ${currentInstallProtocolType} | grep -q ",2,"; then
             echoContent yellow "VLESS+gRPC[TLS] \c"
         fi
         if echo ${currentInstallProtocolType} | grep -q ",6,"; then
             echoContent yellow "Hysteria2 \c"
         fi
-        if echo ${currentInstallProtocolType} | grep -q ",7,"; then
+        if echo ${currentInstallProtocolType} | grep -q ",3,"; then
             echoContent yellow "VLESS+Reality+Vision \c"
         fi
         if echo ${currentInstallProtocolType} | grep -q ",8,"; then
@@ -867,7 +906,7 @@ showInstallStatus() {
         if echo ${currentInstallProtocolType} | grep -q ",11,"; then
             echoContent yellow "VMess+TLS+HTTPUpgrade \c"
         fi
-        if echo ${currentInstallProtocolType} | grep -q ",12,"; then
+        if echo ${currentInstallProtocolType} | grep -q ",4,"; then
             echoContent yellow "VLESS+XHTTP \c"
         fi
         if echo ${currentInstallProtocolType} | grep -q ",13,"; then
@@ -1115,7 +1154,7 @@ installTools() {
     fi
 
     # 检测nginx版本，并提供是否安装/卸载的选项
-    if echo "${selectCustomInstallType}" | grep -qwE ",7,|,8,|,7,8,"; then
+    if echo "${selectCustomInstallType}" | grep -qwE ",3,|,8,|,3,8,"; then
         echoContent green " ---> 检测到无需依赖Nginx的服务，跳过安装"
     else
         if ! command -v nginx &> /dev/null; then
@@ -1450,7 +1489,7 @@ updateRedirectNginxConf() {
     }
 EOF
 
-    if echo "${selectCustomInstallType}" | grep -qE ",2,|,5," || [[ -z "${selectCustomInstallType}" ]]; then
+    if echo "${selectCustomInstallType}" | grep -qE ",2,|,2," || [[ -z "${selectCustomInstallType}" ]]; then
 
         cat <<EOF >>${nginxConfigPath}xray-agent.conf
 server {
@@ -1464,7 +1503,7 @@ server {
 	client_header_timeout 1071906480m;
     keepalive_timeout 1071906480m;
 
-    location /${currentPath}grpc {
+    location /${currentPath} {
     	if (\$content_type !~ "application/grpc") {
     		return 404;
     	}
@@ -1489,7 +1528,7 @@ server {
     }
 }
 EOF
-    elif echo "${selectCustomInstallType}" | grep -q ",5," || [[ -z "${selectCustomInstallType}" ]]; then
+    elif echo "${selectCustomInstallType}" | grep -q ",2," || [[ -z "${selectCustomInstallType}" ]]; then
         cat <<EOF >>${nginxConfigPath}xray-agent.conf
 server {
 	${nginxH2Conf}
@@ -1500,7 +1539,7 @@ server {
 	server_name ${domain};
 	root ${nginxStaticPath};
 
-	location /${currentPath}grpc {
+	location /${currentPath} {
 		client_max_body_size 0;
 		keepalive_requests 4294967296;
 		client_body_timeout 1071906480m;
@@ -1764,14 +1803,11 @@ customPortFunction() {
     local historyCustomPortStatus=
     if [[ -n "${customPort}" || -n "${currentPort}" ]]; then
         echo
-        if [[ -z "${lastInstallationConfig}" ]]; then
-            read -r -p "读取到上次安装时的端口，是否使用上次安装时的端口？[y/n]:" historyCustomPortStatus
-            if [[ "${historyCustomPortStatus}" == "y" ]]; then
-                port=${currentPort}
-                echoContent yellow "\n ---> 端口: ${port}"
-            fi
-        elif [[ -n "${lastInstallationConfig}" ]]; then
+        # 总是询问是否使用上次端口，不管lastInstallationConfig的值
+        read -r -p "读取到上次安装时的端口，是否使用上次安装时的端口？[y/n]:" historyCustomPortStatus
+        if [[ "${historyCustomPortStatus}" == "y" ]]; then
             port=${currentPort}
+            echoContent yellow "\n ---> 端口: ${port}"
         fi
     fi
     if [[ -z "${currentPort}" ]] || [[ "${historyCustomPortStatus}" == "n" ]]; then
@@ -1943,9 +1979,9 @@ installTLS() {
 # 模块 05：核心随机路径与运行时处理
 
 initRandomPath() {
-    local chars="abcdefghijklmnopqrtuxyz"
+    local chars="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     local initCustomPath=
-    for i in {1..4}; do
+    for i in {1..6}; do
         echo "${i}" >/dev/null
         initCustomPath+="${chars:RANDOM%${#chars}:1}"
     done
@@ -1960,12 +1996,11 @@ randomPathFunction() {
         echoContent skyBlue "生成随机路径"
     fi
 
-    if [[ -n "${currentPath}" && -z "${lastInstallationConfig}" ]]; then
+    # 总是询问是否使用上次path，不管lastInstallationConfig的值
+    if [[ -n "${currentPath}" ]]; then
         echo
         read -r -p "读取到上次安装记录，是否使用上次安装时的path路径 ？[y/n]:" historyPathStatus
         echo
-    elif [[ -n "${currentPath}" && -n "${lastInstallationConfig}" ]]; then
-        historyPathStatus="y"
     fi
 
     if [[ "${historyPathStatus}" == "y" ]]; then
@@ -1978,13 +2013,7 @@ randomPathFunction() {
             initRandomPath
             currentPath=${customPath}
         else
-            if [[ "${customPath: -2}" == "ws" ]]; then
-                echo
-                echoContent red " ---> 自定义path结尾不可用ws结尾，否则无法区分分流路径"
-                randomPathFunction "$1"
-            else
-                currentPath=${customPath}
-            fi
+            currentPath=${customPath}
         fi
     fi
     echoContent yellow "\n path:${currentPath}"
@@ -2059,7 +2088,7 @@ updateSELinuxHTTPPortT() {
 
 # 操作Nginx
 handleNginx() {
-    if ! echo "${selectCustomInstallType}" | grep -qwE ",7,|,8,|,7,8," && [[ -z $(pgrep -f "nginx") ]] && [[ "$1" == "start" ]]; then
+    if ! echo "${selectCustomInstallType}" | grep -qwE ",3,|,8,|,3,8," && [[ -z $(pgrep -f "nginx") ]] && [[ "$1" == "start" ]]; then
         systemctl start nginx 2>/opt/xray-agent/nginx_error.log
 
         sleep 0.5
@@ -2471,6 +2500,10 @@ initXrayClients() {
     local type=",$1,"
     local newUUID=$2
     local newEmail=$3
+    # 检查 currentClients 是否为空或 null，避免 jq 操作错误
+    if [[ -z "${currentClients}" ]] || [[ "${currentClients}" == "null" ]]; then
+        currentClients="[]"
+    fi
     if [[ -n "${newUUID}" ]]; then
         local newUser=
         newUser="{\"id\":\"${uuid}\",\"flow\":\"xtls-rprx-vision\",\"email\":\"${newEmail}-VLESS_TCP/TLS_Vision\"}"
@@ -2493,38 +2526,38 @@ initXrayClients() {
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # VLESS XHTTP
-        if echo "${type}" | grep -q ",12,"; then
+        if echo "${type}" | grep -q ",4,"; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-VLESS_XHTTP\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # trojan grpc
-        if echo "${type}" | grep -q ",2,"; then
+        if echo "${type}" | grep -q ",11,"; then
             currentUser="{\"password\":\"${uuid}\",\"email\":\"${email}-Trojan_gRPC\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # VMess WS
-        if echo "${type}" | grep -q ",3,"; then
+        if echo "${type}" | grep -q ",9,"; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-VMess_WS\",\"alterId\": 0}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # trojan tcp
-        if echo "${type}" | grep -q ",4,"; then
+        if echo "${type}" | grep -q ",10,"; then
             currentUser="{\"password\":\"${uuid}\",\"email\":\"${email}-trojan_tcp\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # vless grpc
-        if echo "${type}" | grep -q ",5,"; then
+        if echo "${type}" | grep -q ",2,"; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-vless_grpc\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # vless reality vision
-        if echo "${type}" | grep -q ",7,"; then
+        if echo "${type}" | grep -q ",3,"; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-vless_reality_vision\",\"flow\":\"xtls-rprx-vision\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
@@ -2537,6 +2570,10 @@ initXrayClients() {
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
     done < <(echo "${currentClients}" | jq -c '.[]')
+    # 确保返回有效的 JSON 数组
+    if [[ -z "${users}" ]] || [[ "${users}" == "null" ]]; then
+        users="[]"
+    fi
     echo "${users}"
 }
 # 初始化tuic配置
@@ -2819,14 +2856,13 @@ initXrayConfig() {
     echo
     local uuid=
     local addClientsStatus=
-    if [[ -n "${currentUUID}" && -z "${lastInstallationConfig}" ]]; then
+    # 总是询问是否使用上次用户配置，不管lastInstallationConfig的值
+    if [[ -n "${currentUUID}" ]]; then
         read -r -p "读取到上次用户配置，是否使用上次安装的配置 ？[y/n]:" historyUUIDStatus
         if [[ "${historyUUIDStatus}" == "y" ]]; then
             addClientsStatus=true
             echoContent green "\n ---> 使用成功"
         fi
-    elif [[ -n "${currentUUID}" && -n "${lastInstallationConfig}" ]]; then
-        addClientsStatus=true
     fi
 
     if [[ -z "${addClientsStatus}" ]]; then
@@ -2925,7 +2961,7 @@ EOF
 
     # VLESS_WS_TLS
     if echo "${selectCustomInstallType}" | grep -q ",1," || [[ "$1" == "all" ]]; then
-        fallbacksList=${fallbacksList}',{"path":"/'${customPath}'ws","dest":31297,"xver":1}'
+        fallbacksList=${fallbacksList}',{"path":"/'${customPath}'","dest":31297,"xver":1}'
         cat <<EOF >/opt/xray-agent/xray/conf/03_VLESS_WS_inbounds.json
 {
 "inbounds":[
@@ -2943,7 +2979,7 @@ EOF
         "security": "none",
         "wsSettings": {
           "acceptProxyProtocol": true,
-          "path": "/${customPath}ws"
+          "path": "/${customPath}"
         }
       }
     }
@@ -2955,7 +2991,7 @@ EOF
     fi
 
     # VLESS_XHTTP_TLS
-    if echo "${selectCustomInstallType}" | grep -q ",12," || [[ "$1" == "all" ]]; then
+    if echo "${selectCustomInstallType}" | grep -q ",4," || [[ "$1" == "all" ]]; then
         initXrayXHTTPort
         initRealityClientServersName
         initRealityKey
@@ -2969,7 +3005,7 @@ EOF
 	  "protocol": "vless",
 	  "tag":"VLESSRealityXHTTP",
 	  "settings": {
-		"clients": $(initXrayClients 12),
+		"clients": $(initXrayClients 4),
 		"decryption": "none"
 	  },
 	  "streamSettings": {
@@ -3005,7 +3041,7 @@ EOF
     fi
     # trojan_grpc
     #    if echo "${selectCustomInstallType}" | grep -q ",2," || [[ "$1" == "all" ]]; then
-    #        if ! echo "${selectCustomInstallType}" | grep -q ",5," && [[ -n ${selectCustomInstallType} ]]; then
+    #        if ! echo "${selectCustomInstallType}" | grep -q ",2," && [[ -n ${selectCustomInstallType} ]]; then
     #            fallbacksList=${fallbacksList//31302/31304}
     #        fi
     #        cat <<EOF >/opt/xray-agent/xray/conf/04_trojan_gRPC_inbounds.json
@@ -3039,7 +3075,7 @@ EOF
     #    fi
 
     # VLESS_gRPC
-    if echo "${selectCustomInstallType}" | grep -q ",5," || [[ "$1" == "all" ]]; then
+    if echo "${selectCustomInstallType}" | grep -q ",2," || [[ "$1" == "all" ]]; then
         cat <<EOF >/opt/xray-agent/xray/conf/06_VLESS_gRPC_inbounds.json
 {
     "inbounds":[
@@ -3049,13 +3085,13 @@ EOF
             "protocol": "vless",
             "tag":"VLESSGRPC",
             "settings": {
-                "clients": $(initXrayClients 5),
+                "clients": $(initXrayClients 2),
                 "decryption": "none"
             },
             "streamSettings": {
                 "network": "grpc",
                 "grpcSettings": {
-                    "serviceName": "${customPath}grpc"
+                    "serviceName": "${customPath}"
                 }
             }
         }
@@ -3108,7 +3144,7 @@ EOF
     fi
 
     # VLESS_TCP/reality
-    if echo "${selectCustomInstallType}" | grep -q ",7," || [[ "$1" == "all" ]]; then
+    if echo "${selectCustomInstallType}" | grep -q ",3," || [[ "$1" == "all" ]]; then
         echoContent skyBlue "\n===================== 配置VLESS+Reality =====================\n"
 
         initXrayRealityPort
@@ -3124,7 +3160,7 @@ EOF
       "protocol": "vless",
       "tag": "VLESSReality",
       "settings": {
-        "clients": $(initXrayClients 7),
+        "clients": $(initXrayClients 3),
         "decryption": "none",
         "fallbacks":[
             {
@@ -3238,7 +3274,7 @@ showAccounts() {
     if echo ${currentInstallProtocolType} | grep -q ",0,"; then
 
         echoContent skyBlue "============================= VLESS TCP TLS_Vision [推荐] ==============================\n"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}02_VLESS_TCP_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}02_VLESS_TCP_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
 
@@ -3252,13 +3288,13 @@ showAccounts() {
     if echo ${currentInstallProtocolType} | grep -q ",1,"; then
         echoContent skyBlue "\n================================ VLESS WS TLS [仅CDN推荐] ================================\n"
 
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}03_VLESS_WS_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}03_VLESS_WS_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
 
             local vlessWSPort=${currentDefaultPort}
             echo
-            local path="/${currentPath}ws"
+            local path="/${currentPath}"
 
             local count=
             while read -r line; do
@@ -3273,9 +3309,9 @@ showAccounts() {
     fi
 
     # trojan grpc
-    if echo ${currentInstallProtocolType} | grep -q ",2,"; then
+    if echo ${currentInstallProtocolType} | grep -q ",11,"; then
         echoContent skyBlue "\n================================  Trojan gRPC TLS [仅CDN推荐]  ================================\n"
-        jq .inbounds[0].settings.clients ${configPath}04_trojan_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//[] | .[]' ${configPath}04_trojan_gRPC_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email)
             local count=
@@ -3291,9 +3327,9 @@ showAccounts() {
         done
     fi
     # VLESS grpc
-    if echo ${currentInstallProtocolType} | grep -q ",5,"; then
+    if echo ${currentInstallProtocolType} | grep -q ",2,"; then
         echoContent skyBlue "\n=============================== VLESS gRPC TLS [仅CDN推荐]  ===============================\n"
-        jq .inbounds[0].settings.clients ${configPath}06_VLESS_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//[] | .[]' ${configPath}06_VLESS_gRPC_inbounds.json | while read -r user; do
 
             local email=
             email=$(echo "${user}" | jq -r .email)
@@ -3311,9 +3347,9 @@ showAccounts() {
         done
     fi
     # VLESS reality vision
-    if echo ${currentInstallProtocolType} | grep -q ",7,"; then
+    if echo ${currentInstallProtocolType} | grep -q ",3,"; then
         echoContent skyBlue "============================= VLESS reality_vision [推荐]  ==============================\n"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}07_VLESS_vision_reality_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}07_VLESS_vision_reality_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
 
@@ -3325,7 +3361,7 @@ showAccounts() {
     # VLESS reality gRPC
     if echo ${currentInstallProtocolType} | grep -q ",8,"; then
         echoContent skyBlue "============================== VLESS reality_gRPC [推荐] ===============================\n"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}08_VLESS_vision_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}08_VLESS_vision_gRPC_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
 
@@ -3335,10 +3371,10 @@ showAccounts() {
         done
     fi
     # VLESS XHTTP
-    if echo ${currentInstallProtocolType} | grep -q ",12,"; then
+    if echo ${currentInstallProtocolType} | grep -q ",4,"; then
         echoContent skyBlue "\n================================ VLESS XHTTP TLS [仅CDN推荐] ================================\n"
 
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}12_VLESS_XHTTP_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients//.inbounds[0].users//[] | .[]' ${configPath}12_VLESS_XHTTP_inbounds.json | while read -r user; do
             local email=
             email=$(echo "${user}" | jq -r .email//.name)
             echo
@@ -3490,13 +3526,13 @@ EOF
     then
 
         echoContent yellow " ---> 通用格式(VLESS+gRPC+TLS)"
-        echoContent green "    vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&fp=chrome&serviceName=${currentPath}grpc&alpn=h2&sni=${currentHost}#${email}\n"
+        echoContent green "    vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}&fp=chrome&serviceName=${currentPath}&alpn=h2&sni=${currentHost}#${email}\n"
 
         echoContent yellow " ---> 格式化明文(VLESS+gRPC+TLS)"
-        echoContent green "    协议类型:VLESS，地址:${add}，伪装域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:gRPC，alpn:h2，client-fingerprint: chrome,serviceName:${currentPath}grpc，账户名:${email}\n"
+        echoContent green "    协议类型:VLESS，地址:${add}，伪装域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:gRPC，alpn:h2，client-fingerprint: chrome,serviceName:${currentPath}，账户名:${email}\n"
 
         cat <<EOF >>"/opt/xray-agent/subscribe_local/default/${user}"
-vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&serviceName=${currentPath}grpc&fp=chrome&alpn=h2&sni=${currentHost}#${email}
+vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}&serviceName=${currentPath}&fp=chrome&alpn=h2&sni=${currentHost}#${email}
 EOF
         cat <<EOF >>"/opt/xray-agent/subscribe_local/clashMeta/${user}"
   - name: "${email}"
@@ -3510,14 +3546,14 @@ EOF
     client-fingerprint: chrome
     servername: ${currentHost}
     grpc-opts:
-      grpc-service-name: ${currentPath}grpc
+      grpc-service-name: ${currentPath}
 EOF
 
-        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\": \"vless\",\"server\": \"${add}\",\"server_port\": ${port},\"uuid\": \"${id}\",\"tls\": {  \"enabled\": true,  \"server_name\": \"${currentHost}\",  \"utls\": {    \"enabled\": true,    \"fingerprint\": \"chrome\"  }},\"packet_encoding\": \"xudp\",\"transport\": {  \"type\": \"grpc\",  \"service_name\": \"${currentPath}grpc\"}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
+        singBoxSubscribeLocalConfig=$(jq -r ". += [{\"tag\":\"${email}\",\"type\": \"vless\",\"server\": \"${add}\",\"server_port\": ${port},\"uuid\": \"${id}\",\"tls\": {  \"enabled\": true,  \"server_name\": \"${currentHost}\",  \"utls\": {    \"enabled\": true,    \"fingerprint\": \"chrome\"  }},\"packet_encoding\": \"xudp\",\"transport\": {  \"type\": \"grpc\",  \"service_name\": \"${currentPath}\"}}]" "/opt/xray-agent/subscribe_local/sing-box/${user}")
         echo "${singBoxSubscribeLocalConfig}" | jq . >"/opt/xray-agent/subscribe_local/sing-box/${user}"
 
         echoContent yellow " ---> 二维码 VLESS(VLESS+gRPC+TLS)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dgrpc%26host%3D${currentHost}%26serviceName%3D${currentPath}grpc%26fp%3Dchrome%26path%3D${currentPath}grpc%26sni%3D${currentHost}%26alpn%3Dh2%23${email}"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dgrpc%26host%3D${currentHost}%26serviceName%3D${currentPath}%26fp%3Dchrome%26path%3D${currentPath}%26sni%3D${currentHost}%26alpn%3Dh2%23${email}"
 
     elif [[ "${type}" == "trojan" ]]; then
         # URLEncode
@@ -4234,7 +4270,7 @@ customUserEmail() {
         local checkEmail=
         if [[ "${coreInstallType}" == "1" ]]; then
             local frontingTypeConfig="${frontingType}"
-            if [[ "${currentInstallProtocolType}" == ",7,8," ]]; then
+            if [[ "${currentInstallProtocolType}" == ",3,8," ]]; then
                 frontingTypeConfig="07_VLESS_vision_reality_inbounds"
             fi
 
@@ -4303,7 +4339,7 @@ addUser() {
         fi
 
         # VMess WS
-        if echo "${currentInstallProtocolType}" | grep -q ",3,"; then
+        if echo "${currentInstallProtocolType}" | grep -q ",2,"; then
             local clients=
             clients=$(initXrayClients 3 "${uuid}" "${email}")
             clients=$(jq -r "${userConfig} = ${clients}" ${configPath}05_VMess_WS_inbounds.json)
@@ -4319,7 +4355,7 @@ addUser() {
         fi
 
         # vless grpc
-        if echo "${currentInstallProtocolType}" | grep -q ",5,"; then
+        if echo "${currentInstallProtocolType}" | grep -q ",2,"; then
             local clients=
             clients=$(initXrayClients 5 "${uuid}" "${email}")
             clients=$(jq -r "${userConfig} = ${clients}" ${configPath}06_VLESS_gRPC_inbounds.json)
@@ -4327,7 +4363,7 @@ addUser() {
         fi
 
         # vless reality vision
-        if echo "${currentInstallProtocolType}" | grep -q ",7,"; then
+        if echo "${currentInstallProtocolType}" | grep -q ",3,"; then
             local clients=
             clients=$(initXrayClients 7 "${uuid}" "${email}")
             clients=$(jq -r "${userConfig} = ${clients}" ${configPath}07_VLESS_vision_reality_inbounds.json)
@@ -5173,26 +5209,24 @@ EOF
 # Xray-core个性化安装
 customXrayInstall() {
     echoContent skyBlue "\n========================个性化安装============================"
-    echoContent yellow "VLESS前置，默认安装0，无域名安装Reality只选择7即可"
+    echoContent yellow "VLESS前置，默认安装0，无域名安装Reality只选择3即可"
     echoContent yellow "0.VLESS+TLS_Vision+TCP[推荐]"
     echoContent yellow "1.VLESS+TLS+WS[仅CDN推荐]"
-    #    echoContent yellow "2.Trojan+TLS+gRPC[仅CDN推荐]"
-    echoContent yellow "3.VLESS+TLS+gRPC[仅CDN推荐]"
-    echoContent yellow "7.VLESS+Reality+uTLS+Vision[推荐]"
-    # echoContent yellow "8.VLESS+Reality+gRPC"
-    echoContent yellow "12.VLESS+XHTTP+TLS"
+    echoContent yellow "2.VLESS+TLS+gRPC[仅CDN推荐]"
+    echoContent yellow "3.VLESS+Reality+uTLS+Vision[推荐]"
+    echoContent yellow "4.VLESS+XHTTP+TLS"
     read -r -p "请选择[多选]，[例如:1,2,3]:" selectCustomInstallType
     echoContent skyBlue "--------------------------------------------------------------"
     if echo "${selectCustomInstallType}" | grep -q "，"; then
         echoContent red " ---> 请使用英文逗号分隔"
         exit 0
     fi
-    if [[ "${selectCustomInstallType}" != "12" ]] && ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
+    if [[ "${selectCustomInstallType}" != "4" ]] && ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
         echoContent red " ---> 多选请使用英文逗号分隔"
         exit 0
     fi
 
-    if [[ "${selectCustomInstallType}" == "7" ]]; then
+    if [[ "${selectCustomInstallType}" == "3" ]]; then
         selectCustomInstallType=",${selectCustomInstallType},"
     else
         if ! echo "${selectCustomInstallType}" | grep -q "0,"; then
@@ -5205,7 +5239,7 @@ customXrayInstall() {
     if [[ "${selectCustomInstallType:0:1}" != "," ]]; then
         selectCustomInstallType=",${selectCustomInstallType},"
     fi
-    if [[ "${selectCustomInstallType//,/}" =~ ^[0-7]+$ ]]; then
+    if [[ "${selectCustomInstallType//,/}" =~ ^[0-4]+$ ]]; then
         readLastInstallationConfig
         unInstallSubscribe
         checkBTPanel
@@ -5216,12 +5250,12 @@ customXrayInstall() {
         if [[ -n "${btDomain}" ]]; then
             echoContent skyBlue "\n进度  3/${totalProgress} : 检测到宝塔面板/1Panel/HestiaCP，跳过申请TLS步骤"
             handleXray stop
-            if [[ "${selectCustomInstallType}" != ",7," ]]; then
+            if [[ "${selectCustomInstallType}" != ",3," ]]; then
                 customPortFunction
             fi
         else
             # 申请tls
-            if [[ "${selectCustomInstallType}" != ",7," ]]; then
+            if [[ "${selectCustomInstallType}" != ",3," ]]; then
                 initTLSNginxConfig 2
                 handleXray stop
                 installTLS 3
@@ -5232,7 +5266,7 @@ customXrayInstall() {
 
         handleNginx stop
         # 随机path
-        if echo "${selectCustomInstallType}" | grep -qE ",1,|,2,|,5,|,12,"; then
+        if echo "${selectCustomInstallType}" | grep -qE ",1,|,2,|,2,|,4,"; then
             randomPathFunction 4
         fi
         if [[ -n "${btDomain}" ]]; then
@@ -5240,7 +5274,7 @@ customXrayInstall() {
         else
             nginxBlog 6
         fi
-        if [[ "${selectCustomInstallType}" != ",7," ]]; then
+        if [[ "${selectCustomInstallType}" != ",3," ]]; then
             updateRedirectNginxConf
             handleNginx start
         fi
@@ -5249,7 +5283,7 @@ customXrayInstall() {
         installXray 7 false
         installXrayService 8
         initXrayConfig custom 9
-        if [[ "${selectCustomInstallType}" != ",7," ]]; then
+        if [[ "${selectCustomInstallType}" != ",3," ]]; then
             installCronTLS 10
         fi
 
@@ -5268,20 +5302,11 @@ customXrayInstall() {
 # 模块 10：核心安装、版本与订阅管理
 
 selectCoreInstall() {
-    echoContent skyBlue "\n功能 1/${totalProgress} : 选择核心安装"
-    echoContent red "\n=============================================================="
-    echoContent yellow "1.Xray-core"
-    echoContent red "=============================================================="
-    read -r -p "请选择:" selectCoreType
-    if [[ "${selectCoreType}" == "1" ]]; then
-        if [[ "${selectInstallType}" == "2" ]]; then
-            customXrayInstall
-        else
-            xrayCoreInstall
-        fi
+    # 现在只支持 Xray-core，直接进入安装
+    if [[ "${selectInstallType}" == "2" ]]; then
+        customXrayInstall
     else
-        echoContent red ' ---> 选择错误，重新选择'
-        selectCoreInstall
+        xrayCoreInstall
     fi
 }
 
@@ -5338,18 +5363,8 @@ coreVersionManageMenu() {
         menu
         exit 0
     fi
-    echoContent skyBlue "\n功能 1/1 : 请选择核心"
-    echoContent red "\n=============================================================="
-    echoContent yellow "1.Xray-core"
-    echoContent red "=============================================================="
-    read -r -p "请输入:" selectCore
-
-    if [[ "${selectCore}" == "1" ]]; then
-        xrayVersionManageMenu 1
-    else
-        echoContent red ' ---> 选择错误，重新选择'
-        coreVersionManageMenu
-    fi
+    # 现在只支持 Xray-core，直接进入版本管理
+    xrayVersionManageMenu 1
 }
 # 定时任务检查
 cronFunction() {
@@ -5433,7 +5448,7 @@ installSubscribe() {
         echo
         local httpSubscribeStatus=
 
-        if ! echo "${selectCustomInstallType}" | grep -qE ",0,|,1,|,2,|,5,|,7,|,12," && ! echo "${currentInstallProtocolType}" | grep -qE ",0,|,1,|,2,|,5,|,7,|,12," && [[ -z "${domain}" ]]; then
+        if ! echo "${selectCustomInstallType}" | grep -qE ",0,|,1,|,2,|,2,|,3,|,4," && ! echo "${currentInstallProtocolType}" | grep -qE ",0,|,1,|,2,|,2,|,3,|,4," && [[ -z "${domain}" ]]; then
             httpSubscribeStatus=true
         fi
 
@@ -6157,7 +6172,8 @@ initRealityKey() {
     echoContent white "   • Public Key (公钥):  客户端使用，可以公开"
     echoContent white "   • 基于 X25519 椭圆曲线算法\n"
     
-    if [[ -n "${currentRealityPublicKey}" && -z "${lastInstallationConfig}" ]]; then
+    # 总是询问是否使用上次密钥对，不管lastInstallationConfig的值
+    if [[ -n "${currentRealityPublicKey}" ]]; then
         echoContent yellow "检测到上次安装的密钥对"
         echoContent green "Public Key:  ${currentRealityPublicKey}"
         echoContent green "Private Key: ${currentRealityPrivateKey}\n"
@@ -6166,9 +6182,6 @@ initRealityKey() {
             realityPrivateKey=${currentRealityPrivateKey}
             realityPublicKey=${currentRealityPublicKey}
         fi
-    elif [[ -n "${currentRealityPublicKey}" && -n "${lastInstallationConfig}" ]]; then
-        realityPrivateKey=${currentRealityPrivateKey}
-        realityPublicKey=${currentRealityPublicKey}
     fi
     if [[ -z "${realityPrivateKey}" ]]; then
         echoContent yellow "💡 通常选择："
@@ -6242,7 +6255,8 @@ checkRealityDest() {
 # 初始化客户端可用的ServersName
 initRealityClientServersName() {
     local realityDestDomainList="gateway.icloud.com,itunes.apple.com,swdist.apple.com,swcdn.apple.com,updates.cdn-apple.com,mensura.cdn-apple.com,osxapps.itunes.apple.com,aod.itunes.apple.com,download-installer.cdn.mozilla.net,addons.mozilla.org,s0.awsstatic.com,d1.awsstatic.com,images-na.ssl-images-amazon.com,m.media-amazon.com,player.live-video.net,one-piece.com,lol.secure.dyn.riotcdn.net,www.lovelive-anime.jp,www.swift.com,academy.nvidia.com,www.cisco.com,www.asus.com,www.samsung.com,www.amd.com,cdn-dynmedia-1.microsoft.com,software.download.prss.microsoft.com,dl.google.com,www.google-analytics.com"
-    if [[ -n "${realityServerName}" && -z "${lastInstallationConfig}" ]]; then
+    # 总是询问是否使用上次域名，不管lastInstallationConfig的值
+    if [[ -n "${realityServerName}" ]]; then
         if echo ${realityDestDomainList} | grep -q "${realityServerName}"; then
             read -r -p "读取到上次安装设置的Reality域名，是否使用？[y/n]:" realityServerNameStatus
             if [[ "${realityServerNameStatus}" != "y" ]]; then
@@ -6253,9 +6267,6 @@ initRealityClientServersName() {
             realityServerName=
             realityDomainPort=
         fi
-    elif [[ -n "${realityServerName}" && -z "${lastInstallationConfig}" ]]; then
-        realityServerName=
-        realityDomainPort=
     fi
 
     if [[ -z "${realityServerName}" ]]; then
@@ -6328,13 +6339,12 @@ initRealityClientServersName() {
 }
 # 初始化reality端口
 initXrayRealityPort() {
-    if [[ -n "${xrayVLESSRealityPort}" && -z "${lastInstallationConfig}" ]]; then
+    # 总是询问是否使用上次端口，不管lastInstallationConfig的值
+    if [[ -n "${xrayVLESSRealityPort}" ]]; then
         read -r -p "读取到上次安装记录，是否使用上次安装时的端口 ？[y/n]:" historyRealityPortStatus
         if [[ "${historyRealityPortStatus}" == "y" ]]; then
             realityPort=${xrayVLESSRealityPort}
         fi
-    elif [[ -n "${xrayVLESSRealityPort}" && -n "${lastInstallationConfig}" ]]; then
-        realityPort=${xrayVLESSRealityPort}
     fi
 
     if [[ -z "${realityPort}" ]]; then
@@ -6428,7 +6438,7 @@ manageReality() {
         exit 0
     fi
 
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",3,"
     initXrayConfig custom 1 true
 
     reloadCore
@@ -6514,7 +6524,7 @@ menu() {
     echoContent yellow "8.添加新端口"
     echoContent yellow "9.ALPN切换"
     echoContent skyBlue "-------------------------版本管理-----------------------------"
-    echoContent yellow "10.core管理"
+    echoContent yellow "10.Xray版本管理"
     echoContent yellow "11.更新脚本"
     echoContent skyBlue "-------------------------脚本管理-----------------------------"
     echoContent yellow "12.卸载脚本"
