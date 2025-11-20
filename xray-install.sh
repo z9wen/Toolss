@@ -6305,7 +6305,7 @@ initRealityClientServersName() {
             echoContent white "   如果被检测，流量看起来像在访问正常的 HTTPS 网站\n"
             
             echoContent yellow "💡 推荐的伪装目标（可直接使用）："
-            echoContent green "   • addons.mozilla.org        (Mozilla 插件商店，推荐⭐)"
+            echoContent green "   • addons.mozilla.org        (Mozilla 插件商店)"
             echoContent green "   • www.lovelive-anime.jp     (动漫官网)"
             echoContent green "   • gateway.icloud.com        (Apple iCloud)"
             echoContent green "   • download-installer.cdn.mozilla.net"
@@ -6362,8 +6362,8 @@ initXrayRealityPort() {
         echoContent white "   • 端口范围：1-65535\n"
         
         echoContent yellow "💡 推荐配置："
-        echoContent green "   • 随机端口（回车自动生成 10000-30000）⭐ 推荐"
-        echoContent green "   • 常用端口：443、8443、2053"
+		echoContent green "   • 常用端口：443、8443、2053"
+        echoContent green "   • 随机端口（回车自动生成 10000-30000)"
         echoContent green "   • 自定义端口：如 12345\n"
         
         read -r -p "请输入端口[回车随机10000-30000]:" realityPort
