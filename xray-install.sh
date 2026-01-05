@@ -2191,7 +2191,8 @@ renewalTLS() {
 
             sudo "$HOME/.acme.sh/acme.sh" --cron --home "$HOME/.acme.sh"
             sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${domain}" --fullchainpath /opt/xray-agent/tls/"${domain}.crt" --keypath /opt/xray-agent/tls/"${domain}.key" --ecc
-            reloadCore
+            handleXray stop
+            handleXray start
             handleNginx start
         else
             echoContent green " ---> 证书有效"
@@ -2301,7 +2302,8 @@ xrayVersionManageMenu() {
     elif [[ "${selectXrayType}" == "5" ]]; then
         handleXray start
     elif [[ "${selectXrayType}" == "6" ]]; then
-        reloadCore
+        handleXray stop
+        handleXray start
     elif [[ "${selectXrayType}" == "7" ]]; then
         updateGeoSite
     elif [[ "${selectXrayType}" == "8" ]]; then
@@ -2323,7 +2325,8 @@ updateGeoSite() {
     wget -c -q "${wgetShowProgressStatus}" -P ${configPath}../ "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${version}/geosite.dat"
     wget -c -q "${wgetShowProgressStatus}" -P ${configPath}../ "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${version}/geoip.dat"
 
-    reloadCore
+    handleXray stop
+    handleXray start
     echoContent green " ---> 更新完毕"
 
 }
@@ -4166,7 +4169,8 @@ EOF
             done < <(echo "${newPort}" | tr ',' '\n')
 
             echoContent green " ---> 添加完毕"
-            reloadCore
+            handleXray stop
+            handleXray start
             addCorePort
         fi
     elif [[ "${selectNewPortType}" == "3" ]]; then
@@ -4183,7 +4187,8 @@ EOF
                 rm "${hysteriaDokodemodoorFilePath}"
             fi
 
-            reloadCore
+            handleXray stop
+            handleXray start
             addCorePort
         else
             echoContent yellow "\n ---> 编号输入错误，请重新选择"
@@ -4379,7 +4384,8 @@ addUser() {
         fi
 
     done
-    reloadCore
+    handleXray stop
+    handleXray start
     echoContent green " ---> 添加完成"
     subscribe false
     manageAccount 1
@@ -4520,7 +4526,8 @@ EOF
             vlessVisionRealityInbounds=$(jq -r ".inbounds[0].streamSettings.realitySettings.show=${realityLogShow}" ${configPath}07_VLESS_vision_reality_inbounds.json)
             echo "${vlessVisionRealityInbounds}" | jq . >${configPath}07_VLESS_vision_reality_inbounds.json
         fi
-        reloadCore
+        handleXray stop
+        handleXray start
         checkLog 1
         ;;
     2)
@@ -4693,7 +4700,8 @@ ipv6Routing() {
         exit 0
     fi
 
-    reloadCore
+    handleXray stop
+    handleXray start
 }
 
 # ipv6分流规则展示
@@ -5005,7 +5013,8 @@ warpRoutingReg() {
         echoContent red " ---> 选择错误"
         exit 0
     fi
-    reloadCore
+    handleXray stop
+    handleXray start
 }
 
 # 分流工具
@@ -5096,7 +5105,8 @@ setUnlockSNI() {
 }
 EOF
             echoContent red " ---> SNI反向代理分流成功"
-            reloadCore
+            handleXray stop
+            handleXray start
         else
             echoContent red " ---> 域名不可为空"
         fi
@@ -5155,7 +5165,8 @@ setUnlockDNS() {
         fi
 
 
-        reloadCore
+        handleXray stop
+        handleXray start
 
         echoContent yellow "\n ---> 如还无法观看可以尝试以下两种方案"
         echoContent yellow " 1.重启vps"
@@ -5181,7 +5192,8 @@ EOF
     fi
 
 
-    reloadCore
+    handleXray stop
+    handleXray start
 
     echoContent green " ---> 卸载成功"
 
@@ -5199,7 +5211,8 @@ removeUnlockSNI() {
 	}
 }
 EOF
-    reloadCore
+    handleXray stop
+    handleXray start
 
     echoContent green " ---> 卸载成功"
 
@@ -6161,7 +6174,8 @@ switchAlpn() {
         echoContent red " ---> 选择错误"
         exit 0
     fi
-    reloadCore
+    handleXray stop
+    handleXray start
 }
 
 # 初始化realityKey
@@ -6441,7 +6455,8 @@ manageReality() {
     selectCustomInstallType=",3,"
     initXrayConfig custom 1 true
 
-    reloadCore
+    handleXray stop
+    handleXray start
     subscribe false
 }
 
