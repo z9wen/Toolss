@@ -801,9 +801,7 @@ EOF
       "streamSettings": {
         "network": "ws",
         "security": "tls",
-        "tlsSettings": {
-          "allowInsecure": false
-        },
+        "tlsSettings": {},
         "wsSettings": {
           "path": "${setVMessWSTLSPath}"
         }
