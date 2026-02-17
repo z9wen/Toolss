@@ -2088,15 +2088,41 @@ updateSELinuxHTTPPortT() {
 
 # 操作Nginx
 handleNginx() {
+    # 检测 Nginx 管理方式
+    local nginxCtl=""
+    
+    # 优先检测宝塔/1Panel
+    if [[ -n "${btDomain}" ]] || [[ -n $(pgrep -f "BT-Panel") ]] || [[ -f "/etc/init.d/nginx" ]]; then
+        if [[ -f "/etc/init.d/nginx" ]]; then
+            nginxCtl="/etc/init.d/nginx"
+        elif [[ -f "/www/server/nginx/sbin/nginx" ]]; then
+            nginxCtl="/www/server/nginx/sbin/nginx"
+        fi
+    fi
+    
+    # 如果不是宝塔，检测 systemd
+    if [[ -z "${nginxCtl}" ]] && systemctl list-unit-files | grep -q "nginx.service"; then
+        nginxCtl="systemctl"
+    fi
+    
+    # 启动 Nginx
     if ! echo "${selectCustomInstallType}" | grep -qwE ",3,|,8,|,3,8," && [[ -z $(pgrep -f "nginx") ]] && [[ "$1" == "start" ]]; then
-        systemctl start nginx 2>/opt/xray-agent/nginx_error.log
+        if [[ "${nginxCtl}" == "systemctl" ]]; then
+            systemctl start nginx 2>/opt/xray-agent/nginx_error.log
+        elif [[ "${nginxCtl}" == "/etc/init.d/nginx" ]]; then
+            /etc/init.d/nginx start 2>/opt/xray-agent/nginx_error.log
+        elif [[ "${nginxCtl}" == "/www/server/nginx/sbin/nginx" ]]; then
+            /www/server/nginx/sbin/nginx -c /www/server/nginx/conf/nginx.conf 2>/opt/xray-agent/nginx_error.log
+        else
+            nginx 2>/opt/xray-agent/nginx_error.log
+        fi
 
         sleep 0.5
 
         if [[ -z $(pgrep -f "nginx") ]]; then
             echoContent red " ---> Nginx启动失败"
             echoContent red " ---> 请将下方日志反馈给开发者"
-            nginx
+            cat /opt/xray-agent/nginx_error.log 2>/dev/null
             if grep -q "journalctl -xe" </opt/xray-agent/nginx_error.log; then
                 updateSELinuxHTTPPortT
             fi
@@ -2104,14 +2130,28 @@ handleNginx() {
             echoContent green " ---> Nginx启动成功"
         fi
 
+    # 停止 Nginx
     elif [[ -n $(pgrep -f "nginx") ]] && [[ "$1" == "stop" ]]; then
-        systemctl stop nginx
+        if [[ "${nginxCtl}" == "systemctl" ]]; then
+            systemctl stop nginx 2>/dev/null
+        elif [[ "${nginxCtl}" == "/etc/init.d/nginx" ]]; then
+            /etc/init.d/nginx stop 2>/dev/null
+        elif [[ "${nginxCtl}" == "/www/server/nginx/sbin/nginx" ]]; then
+            /www/server/nginx/sbin/nginx -s stop 2>/dev/null
+        fi
+        
         sleep 0.5
 
+        # 如果不是宝塔且进程仍存在，强制关闭
         if [[ -z ${btDomain} && -n $(pgrep -f "nginx") ]]; then
-            pgrep -f "nginx" | xargs kill -9
+            pgrep -f "nginx" | xargs kill -9 2>/dev/null
         fi
-        echoContent green " ---> Nginx关闭成功"
+        
+        if [[ -z $(pgrep -f "nginx") ]]; then
+            echoContent green " ---> Nginx关闭成功"
+        else
+            echoContent yellow " ---> Nginx关闭完成（宝塔/1Panel管理）"
+        fi
     fi
 }
 
