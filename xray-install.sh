@@ -982,15 +982,21 @@ useNativeACMECert() {
 
 # Nginx 环境检测
 checkNginxEnvironment() {
-    if command -v nginx &> /dev/null; then
+    local nginxBin="nginx"
+    # 优先检测面板自带的 nginx
+    if [[ -f "/www/server/nginx/sbin/nginx" ]]; then
+        nginxBin="/www/server/nginx/sbin/nginx"
+    fi
+
+    if command -v nginx &> /dev/null || [[ -f "/www/server/nginx/sbin/nginx" ]]; then
         echoContent skyBlue "\n========== Nginx 环境检测 ==========\n"
         
         # Nginx 版本
-        local nginxVer=$(nginx -v 2>&1 | awk -F'/' '{print $2}')
+        local nginxVer=$(${nginxBin} -v 2>&1 | awk -F'/' '{print $2}')
         echoContent green "Nginx 版本: ${nginxVer}"
         
-        # 配置文件数量
-        local confCount=$(find /etc/nginx/conf.d /etc/nginx/sites-enabled -name "*.conf" 2>/dev/null | wc -l)
+        # 配置文件数量 - 使用 nginxConfigPath
+        local confCount=$(find "${nginxConfigPath}" /etc/nginx/sites-enabled -name "*.conf" 2>/dev/null | wc -l)
         echoContent yellow "现有配置文件: ${confCount} 个"
         
         # 监听的端口
@@ -999,8 +1005,8 @@ checkNginxEnvironment() {
             echoContent yellow "监听端口: ${ports}"
         fi
         
-        # 配置的域名
-        local domains=$(grep -rh "server_name" /etc/nginx/conf.d /etc/nginx/sites-enabled 2>/dev/null | grep -v "server_name _" | awk '{for(i=2;i<=NF;i++)print $i}' | sed 's/;//g' | sort -u | head -5)
+        # 配置的域名 - 使用 nginxConfigPath
+        local domains=$(grep -rh "server_name" "${nginxConfigPath}" /etc/nginx/sites-enabled 2>/dev/null | grep -v "server_name _" | awk '{for(i=2;i<=NF;i++)print $i}' | sed 's/;//g' | sort -u | head -5)
         if [[ -n "${domains}" ]]; then
             echoContent yellow "已配置域名:"
             echo "${domains}" | while read -r d; do
@@ -1015,6 +1021,16 @@ checkNginxEnvironment() {
 initVar "$1"
 checkSystem
 checkCPUVendor
+
+# 面板path早期检测（无需用户输入，仅设置 nginxConfigPath）
+detectPanelNginxPath() {
+    if [[ -n $(pgrep -f "BT-Panel") ]] && [[ -d "/www/server/panel/vhost/nginx" ]]; then
+        nginxConfigPath="/www/server/panel/vhost/nginx/"
+    elif [[ -d "/opt/1panel/apps/openresty/openresty/conf/conf.d" ]]; then
+        nginxConfigPath="/opt/1panel/apps/openresty/openresty/conf/conf.d/"
+    fi
+}
+detectPanelNginxPath
 
 readInstallType
 readInstallProtocolType
@@ -1157,15 +1173,25 @@ installTools() {
     if echo "${selectCustomInstallType}" | grep -qwE ",3,|,8,|,3,8,"; then
         echoContent green " ---> 检测到无需依赖Nginx的服务，跳过安装"
     else
-        if ! command -v nginx &> /dev/null; then
+        # 检测宝塔/aaPanel 面板自带的 nginx（不在系统PATH，但已安装）
+        local panelNginxBin=""
+        if [[ -f "/www/server/nginx/sbin/nginx" ]]; then
+            panelNginxBin="/www/server/nginx/sbin/nginx"
+        fi
+        if ! command -v nginx &> /dev/null && [[ -z "${panelNginxBin}" ]]; then
             echoContent yellow " ---> 未检测到 Nginx，开始安装"
             installNginxTools
         else
-            local existingConfCount=$(find /etc/nginx/conf.d /etc/nginx/sites-enabled -name "*.conf" 2>/dev/null | wc -l)
-            local nginxVersion=$(nginx -v 2>&1)
+            local nginxBinToUse="nginx"
+            [[ -n "${panelNginxBin}" ]] && nginxBinToUse="${panelNginxBin}"
+            local existingConfCount=$(find "${nginxConfigPath}" /etc/nginx/sites-enabled -name "*.conf" 2>/dev/null | wc -l)
+            local nginxVersion=$(${nginxBinToUse} -v 2>&1)
             nginxVersion=$(echo "${nginxVersion}" | awk -F "[n][g][i][n][x][/]" '{print $2}' | awk -F "[.]" '{print $2}')
             
-            if [[ ${nginxVersion} -lt 14 ]]; then
+            # 宝塔/aaPanel 管理的 Nginx，跳过版本强制检查和重装
+            if [[ -n "${panelNginxBin}" ]]; then
+                echoContent green " ---> 检测到面板（宝塔/aaPanel）管理的 Nginx，跳过重装"
+            elif [[ ${nginxVersion} -lt 14 ]]; then
                 echoContent red "\n=============================================================="
                 echoContent yellow "检测到 Nginx 版本 < 1.14，不支持 gRPC"
                 if [[ ${existingConfCount} -gt 0 ]]; then
@@ -1189,12 +1215,10 @@ installTools() {
                 else
                     exit 0
                 fi
-            else
-                if [[ ${existingConfCount} -gt 0 ]]; then
+            elif [[ ${existingConfCount} -gt 0 ]]; then
                     echoContent yellow "\n检测到 Nginx 已安装且有 ${existingConfCount} 个配置文件"
                     echoContent skyBlue "脚本将在共存模式下运行，不会影响现有业务"
                     echoContent green "提示：建议使用不同的域名避免冲突\n"
-                fi
             fi
         fi
     fi
@@ -5055,6 +5079,195 @@ warpRoutingReg() {
     handleXray start
 }
 
+# ==================== 中转管理 ====================
+
+# 添加/更新 relay 规则到 09_routing.json
+addRelayRouting() {
+    local routingFile="/opt/xray-agent/xray/conf/09_routing.json"
+    if [[ -f "${routingFile}" ]]; then
+        # 先移除已有 relay 规则，保证幂等
+        local newConfig
+        newConfig=$(jq 'del(.routing.rules[] | select(.outboundTag == "relay_outbound"))' "${routingFile}")
+
+        # 仅匹配从 VLESSTCP inbound 进来的流量，转发给 relay_outbound
+        # 其余流量（其他协议、其他 inbound）保持原有路由不受影响
+        local relayRule
+        relayRule=$(jq -n '{"type":"field","inboundTag":["VLESSTCP"],"outboundTag":"relay_outbound"}')
+
+        newConfig=$(echo "${newConfig}" | jq --argjson r "${relayRule}" '.routing.rules += [$r]')
+        echo "${newConfig}" > "${routingFile}"
+    fi
+}
+
+# 移除 routing 中的 relay 规则
+removeRelayRouting() {
+    local routingFile="/opt/xray-agent/xray/conf/09_routing.json"
+    if [[ -f "${routingFile}" ]]; then
+        local newConfig
+        newConfig=$(jq 'del(.routing.rules[] | select(.outboundTag == "relay_outbound"))' "${routingFile}")
+        echo "${newConfig}" > "${routingFile}"
+    fi
+}
+
+# 启用中转
+setupRelay() {
+    if [[ -z "${configPath}" ]]; then
+        echoContent red " ---> 未安装，请使用脚本安装"
+        menu
+        exit 0
+    fi
+    echoContent skyBlue "\n配置上游中转服务器\n"
+    echoContent yellow "# 路由规则：用户 → 本机 VLESSTCP inbound → 上游服务器 → 目标"
+    echoContent yellow "# 本机 nginx 等其他服务流量不受影响\n"
+
+    read -r -p "上游服务器地址（IP 或域名）: " relayAddress
+    if [[ -z "${relayAddress}" ]]; then
+        echoContent red " ---> 地址不能为空"
+        return
+    fi
+
+    read -r -p "上游服务器端口 [443]: " relayPort
+    relayPort=${relayPort:-443}
+
+    read -r -p "上游 UUID: " relayUUID
+    if [[ -z "${relayUUID}" ]]; then
+        echoContent red " ---> UUID 不能为空"
+        return
+    fi
+
+    read -r -p "SNI（留空则使用服务器地址）: " relaySNI
+    relaySNI=${relaySNI:-${relayAddress}}
+
+    echoContent yellow "\nFlow 选项:"
+    echoContent yellow "1.xtls-rprx-vision（推荐，对端需支持 XTLS Vision）"
+    echoContent yellow "2.无 Flow（普通 VLESS+TLS）"
+    read -r -p "请选择 [1]: " relayFlowChoice
+    local relayFlow=""
+    local flowField=""
+    if [[ "${relayFlowChoice}" != "2" ]]; then
+        relayFlow="xtls-rprx-vision"
+        flowField='"flow": "xtls-rprx-vision",'
+    fi
+
+    # 写 outbound 配置文件
+    cat <<EOF > /opt/xray-agent/xray/conf/relay_outbound.json
+{
+  "outbounds": [
+    {
+      "tag": "relay_outbound",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${relayAddress}",
+            "port": ${relayPort},
+            "users": [
+              {
+                ${flowField}
+                "id": "${relayUUID}",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "${relaySNI}",
+          "allowInsecure": false
+        }
+      }
+    }
+  ]
+}
+EOF
+
+    # 保存状态供查看
+    cat <<EOF > /opt/xray-agent/relay_config
+RELAY_ADDRESS=${relayAddress}
+RELAY_PORT=${relayPort}
+RELAY_UUID=${relayUUID}
+RELAY_SNI=${relaySNI}
+RELAY_FLOW=${relayFlow}
+EOF
+
+    addRelayRouting
+    handleXray stop
+    handleXray start
+    echo
+    echoContent green " ---> 中转已启用！"
+    echoContent yellow " ---> 路径: 用户 → 本机:VLESSTCP → ${relayAddress}:${relayPort} → 目标"
+    echoContent yellow " ---> 其他入站（WS/gRPC/Reality等）仍直连出站，不受影响"
+}
+
+# 查看当前中转配置
+showRelayConfig() {
+    if [[ ! -f "/opt/xray-agent/relay_config" ]]; then
+        echoContent yellow " ---> 当前未配置中转"
+        return
+    fi
+    # shellcheck disable=SC1091
+    source /opt/xray-agent/relay_config
+    echoContent skyBlue "\n当前中转配置"
+    echoContent red "=============================================================="
+    echoContent yellow "上游地址  : ${RELAY_ADDRESS}"
+    echoContent yellow "上游端口  : ${RELAY_PORT}"
+    echoContent yellow "UUID      : ${RELAY_UUID}"
+    echoContent yellow "SNI       : ${RELAY_SNI}"
+    echoContent yellow "Flow      : ${RELAY_FLOW:-无}"
+    echoContent red "=============================================================="
+}
+
+# 停用中转
+removeRelay() {
+    rm -f /opt/xray-agent/xray/conf/relay_outbound.json
+    rm -f /opt/xray-agent/relay_config
+    removeRelayRouting
+    handleXray stop
+    handleXray start
+    echoContent green " ---> 中转已停用，VLESSTCP 流量恢复直连出站"
+}
+
+# 中转管理菜单
+manageRelay() {
+    if [[ -z "${configPath}" ]]; then
+        echoContent red " ---> 未安装，请使用脚本安装"
+        menu
+        exit 0
+    fi
+
+    local relayStatus="未启用"
+    if [[ -f "/opt/xray-agent/xray/conf/relay_outbound.json" ]]; then
+        relayStatus="已启用"
+        if [[ -f "/opt/xray-agent/relay_config" ]]; then
+            # shellcheck disable=SC1091
+            source /opt/xray-agent/relay_config
+            relayStatus="已启用 → ${RELAY_ADDRESS}:${RELAY_PORT}"
+        fi
+    fi
+
+    echoContent skyBlue "\n功能 1/${totalProgress} : 中转管理"
+    echoContent red "\n=============================================================="
+    echoContent yellow "# 仅将 VLESS TCP Vision (VLESSTCP) 入站的流量转发至上游服务器"
+    echoContent yellow "# 其他协议/入站流量不受影响，保持原有出站"
+    echoContent yellow "# 当前状态: ${relayStatus}\n"
+    echoContent yellow "1.启用 / 更新中转"
+    echoContent yellow "2.查看当前配置"
+    echoContent yellow "3.停用中转"
+    echoContent red "=============================================================="
+    read -r -p "请选择:" relayType
+
+    case ${relayType} in
+    1) setupRelay ;;
+    2) showRelayConfig ;;
+    3) removeRelay ;;
+    esac
+}
+
+# ==================== 分流工具 ====================
+
 # 分流工具
 routingToolsMenu() {
     echoContent skyBlue "\n功能 1/${totalProgress} : 分流工具"
@@ -6554,7 +6767,7 @@ realityScanner() {
 menu() {
     cd "$HOME" || exit
     echoContent red "\n=============================================================="
-    echoContent green "当前版本：v26.02.15"
+    echoContent green "当前版本：v26.03.03"
     echoContent green "描述：Xray 一键安装管理脚本\c"
     showInstallStatus
     checkWgetShowProgress
@@ -6581,6 +6794,8 @@ menu() {
     echoContent yellow "11.更新脚本"
     echoContent skyBlue "-------------------------脚本管理-----------------------------"
     echoContent yellow "12.卸载脚本"
+    echoContent skyBlue "-------------------------中转管理-----------------------------"
+    echoContent yellow "13.中转管理（链式代理）"
     echoContent red "=============================================================="
     mkdirTools
     aliasInstall
@@ -6624,6 +6839,9 @@ menu() {
         ;;
     12)
         unInstall 1
+        ;;
+    13)
+        manageRelay 1
         ;;
     esac
 }
